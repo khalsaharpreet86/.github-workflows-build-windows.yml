@@ -22,14 +22,29 @@ jobs:
           update: true
           install: mingw-w64-ucrt-x86_64-bcg729
 
+      
       - name: Collect bcg729 and MinGW runtime DLLs
         shell: pwsh
         run: |
-          $bin = "C:\\msys64\\ucrt64\\bin"
-          Copy-Item "$bin\\libbcg729.dll" ".\\libbcg729.dll"
+          $bin = "C:\msys64\ucrt64\bin"
+          $dll = Join-Path $bin "libbcg729.dll"
+
+          if (!(Test-Path $dll)) {
+            & "C:\msys64\usr\bin\bash.exe" -lc "pacman -S --noconfirm mingw-w64-ucrt-x86_64-bcg729"
+          }
+
+          if (!(Test-Path $dll)) {
+            Get-ChildItem "C:\msys64" -Filter "libbcg729.dll" -Recurse -ErrorAction SilentlyContinue
+            throw "libbcg729.dll is still missing after installation."
+          }
+
+          Copy-Item $dll ".\libbcg729.dll"
+
           foreach ($name in @("libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libstdc++-6.dll")) {
             $candidate = Join-Path $bin $name
-            if (Test-Path $candidate) { Copy-Item $candidate ".\\$name" }
+            if (Test-Path $candidate) {
+              Copy-Item $candidate ".\$name"
+            }
           }
 
       - name: Set up Python 3.11 x64
