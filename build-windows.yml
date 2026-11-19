@@ -1,0 +1,79 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "wtg_converter.py"
+      - ".github/workflows/build-windows.yml"
+      - "requirements-build.txt"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2 and bcg729
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-bcg729
+
+      - name: Collect bcg729 and MinGW runtime DLLs
+        shell: pwsh
+        run: |
+          $bin = "C:\\msys64\\mingw64\\bin"
+          Copy-Item "$bin\\libbcg729.dll" ".\\libbcg729.dll"
+          foreach ($name in @("libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libstdc++-6.dll")) {
+            $candidate = Join-Path $bin $name
+            if (Test-Path $candidate) { Copy-Item $candidate ".\\$name" }
+          }
+
+      - name: Set up Python 3.11 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: x64
+
+      - name: Download FFmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip ffmpeg-temp
+          $ffmpeg = Get-ChildItem ffmpeg-temp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (!$ffmpeg) { throw "ffmpeg.exe was not found in the downloaded archive." }
+          Copy-Item $ffmpeg.FullName ".\\ffmpeg.exe"
+
+      - name: Install Python build tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller tkinterdnd2
+
+      - name: Build one-file Windows EXE
+        shell: pwsh
+        run: |
+          $args = @(
+            "--noconfirm", "--clean", "--onefile", "--windowed",
+            "--name", "HappyAudios_WTG_Converter",
+            "--add-binary", ".\\libbcg729.dll;.",
+            "--add-binary", ".\\ffmpeg.exe;.",
+            "--collect-all", "tkinterdnd2"
+          )
+          foreach ($name in @("libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libstdc++-6.dll")) {
+            if (Test-Path ".\\$name") { $args += @("--add-binary", ".\\$name;.") }
+          }
+          $args += ".\\wtg_converter.py"
+          python -m PyInstaller @args
+          if (!(Test-Path ".\\dist\\HappyAudios_WTG_Converter.exe")) { throw "Expected EXE was not created." }
+
+      - name: Upload Windows EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HappyAudios-WTG-Converter-Windows-x64
+          path: dist/HappyAudios_WTG_Converter.exe
+          if-no-files-found: error
+          retention-days: 14
